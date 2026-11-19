@@ -51,7 +51,7 @@ const Tos = {
     const el = $('#screen-tos'), ex = curExam(), t = this.get(), T = this.totals(t), h = t.header;
     const C = ex ? examChecks(ex) : null;
     const edited = t.rows.reduce((n, r) => n + (r.genCells ? TOSCOLS.filter(c => normCell(r.cells[c.k]) !== normCell(r.genCells[c.k])).length : 0), 0);
-    const mismatch = ex && t.generatedAt && C.points !== T.grand;
+    const mismatch = ex && t.generatedAt && (fmtOf(ex) === 'scantron' ? C.points : C.count) !== T.grand;
     const F = (k, label, val, ph = '') => `<label class="field">${label}<input data-tosh="${k}" value="${esc(val || '')}" placeholder="${esc(ph)}"></label>`;
     let compN = 0;
     el.innerHTML = `<div class="toolbar"><div class="tabtitle">TOS</div><span class="tiny">Table of Specifications — type item numbers in each cell, separated by commas (e.g., 1, 2, 41-45).</span>
@@ -111,7 +111,7 @@ const Tos = {
   },
   fileBase() { const ex = curExam(); return 'TOS - ' + safeName(ex ? ex.title : 'Table of Specifications'); }
 };
-function L_range(ex) { const L = layout(ex); return L.total ? L.start + '–' + (L.start + L.total - 1) : 'none yet'; }
+function L_range(ex) { const L = layout(ex), n = L.count ?? L.total; return n ? L.start + '–' + (L.start + n - 1) : 'none yet'; }
 document.addEventListener('input', e => {
   const t = e.target; if (!t.dataset) return;
   if (t.dataset.tos) {
@@ -143,7 +143,7 @@ ACT['tos-pdf'] = async () => {
   const p = PAPER[S.settings.paper] || PAPER.letter;
   const r = await Host.printToPDF(printDoc(Tos.printHTML(), 'TOS', true), { defaultName: Tos.fileBase() + '.pdf', pageSize: { width: p.w, height: p.h }, landscape: true, footer: 'TOS — ' + (Tos.hdr().course || ''), margins: { top: 0.5, bottom: 0.6, left: 0.5, right: 0.5 } });
   if (r && r.canceled) return; if (r && r.ok === false) return toast('PDF export failed: ' + r.error, 'error');
-  toast('Tip: in the print dialog, set Destination to “Save as PDF”.', 'info');
+  pdfDoneToast(r);
 };
 ACT['tos-xlsx'] = async () => {
   const t = Tos.get(), T = Tos.totals(t), H = Tos.hdr();

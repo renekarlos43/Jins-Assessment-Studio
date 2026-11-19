@@ -1,11 +1,11 @@
 /* Jin Assessment Studio — Exam Planner: targets by topic × question type, progress vs. the built exam, Jin's planning coach */
 'use strict';
-const PTYPES = [
+let PTYPES = [
   { k: 'mc', n: 'Multiple choice', s: 'MC' }, { k: 'ident', n: 'Identification', s: 'ID' }, { k: 'match', n: 'Matching', s: 'MAT' },
   { k: 'prob', n: 'Problem solving', s: 'PS' }, { k: 'cmc', n: 'Corrected multiple choice (statement combination)', s: 'CMC' },
   { k: 'morse', n: 'Paired-statement “Morse type”', s: 'MORSE' }, { k: 'passage', n: 'Passage-based', s: 'PASS' }
 ];
-const PT = Object.fromEntries(PTYPES.map(t => [t.k, t]));
+let PT = Object.fromEntries(PTYPES.map(t => [t.k, t]));
 const blankTypes = () => Object.fromEntries(PTYPES.map(t => [t.k, 0]));
 const sumTypes = t => PTYPES.reduce((s, x) => s + (parseInt(t[x.k]) || 0), 0);
 /* largest-remainder rounding: whole numbers that add up exactly to total */
@@ -115,10 +115,11 @@ const Planner = {
       <div id="plan-details" hidden>${Exam.detailsCard(ex)}</div>
       <div class="grid2">
         <div style="min-width:0">
+          ${this.formatCard(ex)}
           <div class="card"><div class="cardhead"><h2>Plan settings</h2><span class="tiny">Targets guide the build; they never block it.</span></div>
             <div class="details" style="grid-template-columns:repeat(3,minmax(0,1fr))">
-              <label class="field">Total number of questions<input type="number" min="0" data-pl="total" value="${pl.total || ''}" placeholder="e.g., 40"></label>
-              <label class="field">Total points (optional)<input type="number" min="0" data-pl="points" value="${pl.points ?? ''}" placeholder="e.g., 45"></label>
+              <label class="field">Total number of questions<input type="number" min="0" data-pl="total" value="${pl.total || ''}" placeholder="e.g., ${fmtOf(ex) === 'scantron' ? 40 : 15}"></label>
+              <label class="field">${fmtOf(ex) === 'onepage' ? 'Total points (30 by default)' : 'Total points (optional)'}<input type="number" min="0" data-pl="points" value="${pl.points ?? ''}" placeholder="e.g., ${fmtOf(ex) === 'onepage' ? 30 : 45}"></label>
               <label class="field">Duration in minutes (optional)<input type="number" min="0" data-pl="duration" value="${pl.duration ?? ''}" placeholder="e.g., 60"></label>
             </div>
             <div class="row" style="margin-top:10px">
@@ -132,7 +133,7 @@ const Planner = {
             ${pl.rows.length ? this.matrixHTML(ex, P) : `<div class="empty"><img src="${CHIBI.idea}" alt=""><b>No plan yet</b>Add topic rows, load your competencies, or start from the sample plan to see how planning works.<div class="row" style="justify-content:center;margin-top:12px"><button class="btn blue" data-a="plan-add-row">${icon('plus')}Add topic row</button><button class="btn" data-a="plan-sample">Use sample plan</button></div></div>`}
           </div>
           <details class="card optcard" ${pl.bloom || pl.diff ? 'open' : ''} id="plan-optional"><summary><h2 style="display:inline">Optional targets: Bloom’s levels and difficulty</h2></summary><div id="plan-optional-body">${this.optionalHTML(ex, P)}</div></details>
-          <div class="row" style="justify-content:flex-end;margin-top:4px"><button class="btn gold" data-a="exam-tab" data-tab="builder">Continue to Exam Builder →</button></div>
+          <div class="row" style="justify-content:flex-end;margin-top:4px"><button class="btn gold" data-a="exam-tab" data-tab="builder">Continue to ${fmtOf(ex) === 'gforms' ? 'Form' : 'Exam'} Builder →</button></div>
         </div>
         <div style="min-width:0" id="plan-rail">${this.railHTML(ex, P)}</div>
       </div>`;
@@ -334,7 +335,7 @@ ACT['plan-suggest'] = b => {
   const m = modal(draw(), { size: 'wide', onClose: () => Planner.refresh(true) || (APP.examTab === 'builder' && Exam.refreshMeta()) });
   m.addEventListener('click', e => {
     const add = e.target.closest('[data-sg]');
-    if (add) { const src = Q(add.dataset.sg); const c = cloneQ(src, { inBank: false, srcBank: src.id }); if (r.link.kind === 'comp') (isGroup(c) ? kidsOf(c) : [c]).forEach(k => { if (!k.comp) { k.comp = r.link.id; k.compConf = 'manual'; } }); ex.items.push(c.id); ex.updated = nowISO(); touch(); toast('Added to the exam.'); m.innerHTML = `<button class="mclose" data-a="modal-close" aria-label="Close">${icon('x')}</button>` + draw(); if (APP.examTab === 'builder') Exam.rerender(); return; }
+    if (add) { const src = Q(add.dataset.sg); const c = cloneQ(src, { inBank: false, srcBank: src.id }); if (r.link.kind === 'comp') (isGroup(c) ? kidsOf(c) : [c]).forEach(k => { if (!k.comp) { k.comp = r.link.id; k.compConf = 'manual'; } }); ex.items.push(...fmtAdopt(ex, c)); ex.updated = nowISO(); touch(); toast('Added to the exam.'); m.innerHTML = `<button class="mclose" data-a="modal-close" aria-label="Close">${icon('x')}</button>` + draw(); if (APP.examTab === 'builder') Exam.rerender(); return; }
     if (e.target.closest('[data-sg-new]')) { closeModal(true); Planner.addNew(ex, r, type || 'mc'); }
   });
 };
@@ -374,7 +375,7 @@ Planner.advice = function (ex) {
       add({ key: 'notypes:' + r.id, sev: 'info', title: `Choose question types for ${rl(r)}`, why: `${s.kinds.length ? 'Its wording reads as ' + s.kinds.join(' + ') + ' — ' : ''}${s.reasons[0]}. Suggested: ${PTYPES.filter(t => s.types[t.k]).map(t => s.types[t.k] + ' ' + t.s).join(', ')}.`, actions: [{ label: 'Apply suggestion', run: () => { r.types = s.types; touch(); Planner.refresh(true); } }], edit: { label: 'Set types myself', run: focus(`tr[data-prow="${r.id}"] [data-pr=type]`) } });
     }
     /* type mix vs. what the competency asks students to do */
-    if (r.target >= 4 && ts) {
+    if (r.target >= 4 && ts && fmtOf(ex) === 'scantron') {
       const kinds = Planner.kindsOf(r), mcShare = (r.types.mc || 0) / ts, appl = kinds.apply || kinds.analyze || kinds.create;
       if (mcShare >= .7 && appl && !r.types.prob && !r.types.passage) {
         const want = kinds.analyze && !kinds.apply ? 'passage' : 'prob', ev = Planner.typeMix(r).evidence;
@@ -400,7 +401,7 @@ Planner.advice = function (ex) {
     const bs = pl.bloom.reduce((s, v) => s + (v || 0), 0);
     if (pl.total && bs !== pl.total) add({ key: 'bloomsum:' + bs, sev: 'warn', title: `Bloom targets add up to ${bs}, not ${pl.total}`, why: 'Each question has one level, so the Bloom targets should total the exam size.', actions: [{ label: `Scale to ${pl.total}`, run: () => { const c = lrAllocate(pl.bloom.map(v => v || 0), pl.total); pl.bloom = c; touch(); Planner.refresh(true); } }], edit: { label: 'Edit Bloom targets', run: () => { $('#plan-optional').open = true; focus('[data-pb="0"]')(); } } });
     if (P.built) { const diffs = pl.bloom.map((v, i) => v == null ? 0 : P.bloomAct[i] - v); const worst = diffs.map((d, i) => [d, i]).filter(x => x[0] < 0).sort((a, b) => a[0] - b[0])[0]; if (worst) add({ key: 'bloomgap:' + worst[1] + ':' + P.bloomAct[worst[1]], sev: 'info', title: `${BL[worst[1]]}: ${P.bloomAct[worst[1]]} built, ${pl.bloom[worst[1]]} planned`, why: `Uneven Bloom coverage. Levels come from each question’s classification (Original Bloom 1956) — some may be provisional.`, actions: [{ label: 'Review Bloom levels', run: () => App.go('comps') }, { label: 'Open the Bloom report', run: () => { APP.examTab = 'builder'; App.go('exam'); ACT['bloom-report'](); } }], edit: null }); }
-  } else if (pl.rows.some(r => sumTypes(r.types))) {
+  } else if (pl.rows.some(r => sumTypes(r.types)) && fmtOf(ex) === 'scantron') {
     const t = P.typeTotals, hi = t.prob + t.passage + t.cmc + t.morse, all = PTYPES.reduce((s, x) => s + t[x.k], 0);
     if (all >= 10 && hi / all < .15) add({ key: 'hots', sev: 'info', title: 'The plan leans on recall-style formats', why: `Only ${hi} of ${all} planned items are problem solving, statement-combination, Morse or passage-based — formats that usually reach Application and Analysis.`, actions: [{ label: 'Add Bloom targets', run: () => { $('#plan-optional').open = true; focus('[data-pb="2"]')(); } }], edit: null });
   }
@@ -415,7 +416,7 @@ Planner.advice = function (ex) {
   }
   /* points and time */
   const C = examChecks(ex);
-  if (pl.points && C.points && pl.points !== C.points) add({ key: 'pts:' + C.points, sev: 'info', title: `The exam is worth ${C.points} points; the plan says ${pl.points}`, why: 'Problem-solving items count their points, so totals can drift as you build.', actions: [{ label: `Update the plan to ${C.points}`, run: () => { pl.points = C.points; touch(); Planner.refresh(true); } }], edit: { label: 'Edit points', run: focus('[data-pl=points]') } });
+  if (pl.points && C.points && pl.points !== C.points) add({ key: 'pts:' + C.points, sev: fmtOf(ex) === 'onepage' ? 'warn' : 'info', title: `The ${fmtOf(ex) === 'onepage' ? 'quiz' : 'exam'} is worth ${C.points} points; the plan says ${pl.points}`, why: fmtOf(ex) === 'onepage' ? 'One-page quizzes add up the points of every item. Adjust item points in the Exam Builder, or change the target.' : 'Problem-solving items count their points, so totals can drift as you build.', actions: [{ label: `Update the plan to ${C.points}`, run: () => { pl.points = C.points; touch(); Planner.refresh(true); } }], edit: { label: 'Edit points', run: focus('[data-pl=points]') } });
   if (pl.duration) {
     const per = { mc: 1, ident: 1, match: .75, prob: 0, cmc: 1.5, morse: 1, passage: 1.5 }; let est = 0;
     if (P.built) P.L.leaves.forEach(q => { const t = Planner.actualType(q); est += t === 'prob' ? 2.5 * weight(q) : per[t] || 1; });
@@ -436,7 +437,7 @@ Planner.coachHTML = function (ex, P) {
     ${shown.slice(0, 5).map(a => this.adviceItem(a)).join('')}
     ${shown.length > 5 ? `<button class="link" data-a="assistant" data-tab="plan">See ${shown.length - 5} more in Jin’s panel →</button>` : ''}
     ${hidden ? `<div class="tiny" style="margin-top:6px">${plural(hidden, 'tip')} dismissed · <button class="link" data-a="padv-restore">show again</button></div>` : ''}
-    <div class="tiny" style="margin-top:8px;color:var(--faint)">Based on this exam’s plan, competencies, Bloom levels, item bank and build progress — computed in your browser.</div></div>`;
+    <div class="tiny" style="margin-top:8px;color:var(--faint)">Based on this exam’s plan, competencies, Bloom levels, item bank and build progress — computed on this device.</div></div>`;
 };
 Planner.adviceItem = function (a) {
   const pill = { bad: 'dup', warn: 'overlap', info: 'separate', ok: 'related' }[a.sev] || 'separate', label = { bad: 'FIX', warn: 'CHECK', info: 'IDEA', ok: 'GOOD' }[a.sev] || 'IDEA';

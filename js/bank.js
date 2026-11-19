@@ -47,6 +47,7 @@ const Bank = {
     if (q.type === 'morse') body = `<div class="opts"><span><b>X</b> ${esc(q.x)} (${q.xt ? 'T' : 'F'})</span><span><b>Y</b> ${esc(q.y)} (${q.yt ? 'T' : 'F'})</span><span class="ok">Key: ${morseAns(q)}</span></div>`;
     else if (q.type === 'mc' || q.type === 'cmc') body = `${q.type === 'cmc' ? `<div class="opts">${(q.statements || []).map((s, i) => `<span>${RN[i]}. ${esc(s)}</span>`).join('')}</div>` : ''}<div class="opts">${(q.opts || []).map((o, i) => `<span class="${q.ans === LET[i] ? 'ok' : ''}">${LET[i]}. ${esc(o)}${(q.oimg || [])[i] ? ' 🖼' : ''}</span>`).join('')}</div>`;
     else if (q.type === 'ident' || q.type === 'prob') body = `<div class="opts"><span class="ok">Key: ${esc(q.ansText || '—')}</span>${q.type === 'prob' ? `<span>${q.pts} pts</span>` : ''}</div>`;
+    else if (fmtBankBody(q)) body = fmtBankBody(q);
     else if (isGroup(q)) body = `<div class="opts">${leaves.slice(0, 4).map((k, i) => `<span>• ${esc(Classify.textOf(k).slice(0, 80) || '(empty)')}</span>`).join('')}${leaves.length > 4 ? `<span>+${leaves.length - 4} more</span>` : ''}</div>`;
     const stemTxt = isGroup(q) ? (q.head ? esc(q.head) + ' ' : '') + esc(stripHTML(q.stem).slice(0, 220)) : (q.stem || '<span class="muted">(no question text)</span>');
     return `<div class="bankitem" data-id="${q.id}"><input type="checkbox" class="chk" value="${q.id}"${this.sel.has(q.id) ? ' checked' : ''} aria-label="Select item"><div class="body"><div class="row">${tags}</div><div class="stem">${stemTxt}</div>${body}</div>
@@ -91,7 +92,7 @@ ACT['bank-edit'] = b => Bank.openEditor(b.dataset.id, false);
 ACT['bank-dup'] = b => { const q = Q(b.dataset.id); cloneQ(q, { inBank: true }); touch(); Bank.list(); App.refreshChrome(); toast('Duplicated.'); };
 function bankToExam(ids) {
   let ex = curExam(); if (!ex) { ex = newExam({ teacher: S.settings.teacher }); S.exams.unshift(ex); S.currentExam = ex.id; }
-  ids.forEach(id => { const src = Q(id); if (!src) return; const c = cloneQ(src, { inBank: false, srcBank: src.id }); ex.items.push(c.id); });
+  ids.forEach(id => { const src = Q(id); if (!src) return; const c = cloneQ(src, { inBank: false, srcBank: src.id }); ex.items.push(...fmtAdopt(ex, c)); });
   ex.updated = nowISO(); touch(); App.refreshChrome();
   toast(plural(ids.length, 'item') + ' added to “' + ex.title + '”.');
 }
@@ -196,10 +197,13 @@ const Import = {
     const f = await Host.openFile('.pdf,.docx,.xlsx,.txt', [{ name: 'Question files', extensions: ['pdf', 'docx', 'xlsx', 'txt'] }]); if (!f) return;
     this.target = target; this.fileName = f.name;
     toast('Reading ' + f.name + '…', 'info', 2000);
-    let qs;
+    let qs = null; this.notes = []; this.school = false; this.formula = '';
     try {
-      const r = await Office.readQuestionFile(f.name, f.bytes);
-      qs = r.kind === 'sheets' ? sheetToQuestions(r.sheets) : parsedToQuestions(Office.parseQuestions(r.text));
+      if (/\.docx$/i.test(f.name)) {
+        const sd = await SchoolDocx.parse(f.bytes, target === 'exam' ? curFmt() : 'scantron').catch(e => { console.error(e); return null; });
+        if (sd && sd.qs.filter(isLeaf).length) { qs = sd.qs; this.notes = sd.notes; this.school = true; this.formula = sd.formula || ''; }
+      }
+      if (!qs) { const r = await Office.readQuestionFile(f.name, f.bytes); qs = r.kind === 'sheets' ? sheetToQuestions(r.sheets) : parsedToQuestions(Office.parseQuestions(r.text)); }
     } catch (e) { console.error(e); return toast('Import failed: ' + e.message, 'error'); }
     if (!qs.filter(isLeaf).length) return toast('No questions found in ' + f.name + '. Number each question (1. 2. 3.) and letter the choices (A. B. C. D.).', 'error');
     S.qs.push(...qs); /* temporary until confirmed */
@@ -217,14 +221,14 @@ const Import = {
     const compOpts = (q) => `<option value="">— none —</option>${q._compText ? `<option value="__new" selected>New: ${esc(q._compText.slice(0, 50))}</option>` : ''}` + S.topics.map(t => `<optgroup label="${esc(t.name || 'Competencies')}">${t.comps.map(c => `<option value="${c.id}"${c.id === q.comp ? ' selected' : ''}>${esc(c.text.slice(0, 70))}</option>`).join('')}</optgroup>`).join('');
     let n = 0;
     const row = (q, indent) => {
-      if (isGroup(q)) return `<tr data-id="${q.id}" class="grp"><td><input type="checkbox" class="chk" data-r="inc" checked></td><td colspan="7"><b>${q.type === 'matching' ? 'Matching set' : 'Passage'}:</b> ${esc(q.head || '')} <span class="muted">${esc(stripHTML(q.stem).slice(0, 180))}</span>${(q.sopts || []).length ? `<div class="tiny">Shared choices: ${q.sopts.map((o, i) => LET[i] + '. ' + esc(o)).join(' · ')}</div>` : ''}</td></tr>`;
+      if (isGroup(q)) return `<tr data-id="${q.id}" class="grp"><td><input type="checkbox" class="chk" data-r="inc" checked></td><td colspan="7">${q._sec ? `<div class="tiny" style="font-weight:600;color:var(--navy)">${esc(q._sec.title)}</div>` : ''}<b>${q.type === 'matching' ? 'Matching set' : 'Passage'}:</b> ${esc(q.head || '')} <span class="muted">${esc(stripHTML(q.stem).slice(0, 180))}</span>${(q.sopts || []).length ? `<div class="tiny">Shared choices: ${q.sopts.map((o, i) => LET[i] + '. ' + esc(o)).join(' · ')}</div>` : ''}</td></tr>`;
       n++;
       const choices = q.type === 'morse' ? `X: ${q.x}\nY: ${q.y}` : (q.opts || []).join('\n');
       const ansField = ['mc', 'cmc', 'match'].includes(q.type) ? `<input data-r="ans" value="${esc(q.ans)}" maxlength="1" placeholder="A–E" style="width:52px;text-transform:uppercase">` : q.type === 'morse' ? `<select data-r="mans">${['A', 'B', 'C', 'D'].map(a => `<option${q.ans === a ? ' selected' : ''}>${a}</option>`).join('')}</select>` : `<input data-r="ansText" value="${esc(q.ansText)}" placeholder="Answer">`;
       const bc = q.bloomManual ? '<span class="conf ok">from file</span>' : `<span class="conf ${Classify.CONF[q.bloomConf] || 'low'}" title="${esc(q.bloomWhy)}">${q.bloomConf === 'Low' ? '? uncertain' : q.bloomConf}</span>`;
       const cc = q._compText ? '<span class="conf med">will be created</span>' : q.compConf === 'manual' ? '<span class="conf ok">from file</span>' : q.comp ? `<span class="conf ${q.compConf === 'low' ? 'low' : q.compConf === 'high' ? 'ok' : 'med'}" title="${esc(q.compWhy)}">${q.compConf === 'low' ? '? uncertain' : 'suggested'}</span>` : (S.topics.length ? '<span class="conf low">no match</span>' : '');
       return `<tr data-id="${q.id}"><td><input type="checkbox" class="chk" data-r="inc" checked></td><td style="${indent ? 'padding-left:18px' : ''}">${n}</td>
-        <td><select data-r="type">${(q.parent ? ['mc', 'ident', 'cmc', 'morse', 'match'] : ['mc', 'ident', 'cmc', 'morse', 'prob']).map(t => `<option value="${t}"${t === q.type ? ' selected' : ''}>${TYPE_SHORT[t]}</option>`).join('')}</select></td>
+        <td>${q._sec ? `<div class="tiny" style="font-weight:600;color:var(--navy);margin-bottom:3px">${esc(q._sec.title)}</div>` : ''}<select data-r="type">${(q.parent ? ['mc', 'ident', 'cmc', 'morse', 'match'] : ['mc', 'ident', 'cmc', 'morse', 'prob', ...(['mtf', 'essay', 'seq'].includes(q.type) ? [q.type] : [])]).map(t => `<option value="${t}"${t === q.type ? ' selected' : ''}>${TYPE_SHORT[t]}</option>`).join('')}</select></td>
         <td style="min-width:240px"><textarea data-r="stem">${esc(stripHTML(q.stem))}</textarea></td>
         <td style="min-width:180px">${q.type === 'match' ? '<span class="tiny">Uses the shared choices</span>' : q.type === 'ident' || q.type === 'prob' ? '<span class="tiny">—</span>' : `<textarea data-r="choices" placeholder="One choice per line">${esc(choices)}</textarea>`}</td>
         <td>${ansField}${hasKey(q) ? '' : '<div class="conf low" style="display:inline-block;margin-top:4px">missing</div>'}</td>
@@ -232,7 +236,7 @@ const Import = {
         <td style="min-width:130px"><select data-r="bloom">${BL.map((b, i) => `<option value="${i}"${i === q.bloom ? ' selected' : ''}>${b}</option>`).join('')}</select><div style="margin-top:3px">${bc}</div></td></tr>`;
     };
     const rows = qs.filter(q => !q.parent).map(q => isGroup(q) ? row(q) + kidsOf(q).map(k => row(k, true)).join('') : row(q)).join('');
-    const m = modal(`<h3>Review imported questions</h3><div class="hint">From <b>${esc(this.fileName)}</b>: found ${plural(leaves.length, 'item')} (${Object.entries(counts).map(([k, v]) => v + ' ' + TYPE_SHORT[k]).join(', ')}). Check the parsed text, answers, competencies and Bloom levels. Formatting, images and statements can be refined after import.</div>
+    const m = modal(`<h3>Review imported questions</h3><div class="hint">From <b>${esc(this.fileName)}</b>: found ${plural(leaves.length, 'item')} (${Object.entries(counts).map(([k, v]) => v + ' ' + TYPE_SHORT[k]).join(', ')})${this.school ? ` in ${plural(qs.filter(q => q._sec).length, 'test')}, read with the school quiz layout (answers come from highlighted or underlined text)` : ''}. Check the parsed text, answers, competencies and Bloom levels. Formatting, images and statements can be refined after import.</div>${(this.notes || []).length ? `<div class="pl-status warn" style="margin-top:6px">${this.notes.map(esc).join('<br>')}</div>` : ''}
       <div class="row" style="margin:10px 0">${noKey ? `<span class="tag red">${noKey} missing answer${noKey === 1 ? '' : 's'}</span>` : '<span class="tag green">All answers found</span>'}${lowB ? `<span class="tag amber">${lowB} uncertain Bloom level${lowB === 1 ? '' : 's'}</span>` : ''}${S.topics.length && lowC ? `<span class="tag amber">${lowC} uncertain/unmatched competenc${lowC === 1 ? 'y' : 'ies'}</span>` : ''}${!S.topics.length ? '<span class="tag gray">No competencies yet — add them to get suggestions</span>' : ''}</div>
       <div style="max-height:56vh;overflow:auto;border:1px solid #e3e9f2;border-radius:10px"><table class="review-table"><thead><tr><th></th><th>#</th><th>Type</th><th>Question</th><th>Choices</th><th>Answer</th><th>Competency</th><th>Bloom</th></tr></thead><tbody>${rows}</tbody></table></div>
       <div class="mfoot">${this.target === 'exam' ? '<label class="tiny"><input type="checkbox" id="imp-bank" checked> Also save to item bank</label>' : ''}<span class="spacer"></span><button class="btn" id="imp-cancel">Cancel</button><button class="btn blue" id="imp-ok">${this.target === 'exam' ? 'Add to exam' : 'Add to item bank'}</button></div>`, { size: 'wide', onClose: () => { this.cleanup(); }, noFocus: true });
@@ -264,8 +268,17 @@ const Import = {
     keep.forEach(q => { if (q._compText && !dropIds.has(q.id)) { const tname = q._topic || 'Imported competencies'; let t = S.topics.find(x => (x.name || '').toLowerCase() === tname.toLowerCase()); if (!t) { t = { id: uid(), name: tname, comps: [] }; S.topics.push(t); } let c = t.comps.find(c => c.text.toLowerCase() === q._compText.toLowerCase()); if (!c) { c = { id: uid(), text: q._compText }; t.comps.push(c); made++; } q.comp = c.id; q.compConf = 'manual'; } delete q._compText; delete q._topic; delete q._skip; });
     const tops = keep.filter(q => !q.parent && !dropIds.has(q.id));
     const alsoBank = this.target === 'bank' || ($('#imp-bank') && $('#imp-bank').checked);
-    if (this.target === 'exam') { let ex = curExam(); if (!ex) { ex = newExam(); S.exams.unshift(ex); S.currentExam = ex.id; } tops.forEach(q => { q.inBank = alsoBank; ex.items.push(q.id); }); ex.updated = nowISO(); }
-    else tops.forEach(q => { q.inBank = true; });
+    if (this.target === 'exam') {
+      let ex = curExam(); if (!ex) { ex = newExam(); S.exams.unshift(ex); S.currentExam = ex.id; }
+      const f = fmtOf(ex);
+      if (this.school && this.formula && f === 'onepage' && !stripHTML(ex.formula) && !/<img/i.test(ex.formula || '')) ex.formula = this.formula;
+      tops.forEach(q => {
+        if (q._sec) { const s = newQ('section', { title: q._sec.title, dir: q._sec.dir, preset: f === 'onepage' ? q._sec.preset : 'custom', pool: f === 'onepage' ? q._sec.pool : '', drawLabel: f === 'onepage' ? q._sec.drawLabel : '', numBy: '' }); S.qs.push(s); ex.items.push(s.id); }
+        delete q._sec; q.inBank = alsoBank; ex.items.push(...fmtAdopt(ex, q));
+      });
+      ex.updated = nowISO();
+    }
+    else tops.forEach(q => { delete q._sec; q.inBank = true; });
     const n = keep.filter(q => isLeaf(q) && !dropIds.has(q.id)).length;
     this.qs = []; closeModal(true); touch();
     App.go(this.target === 'exam' ? 'exam' : 'bank');

@@ -15,10 +15,11 @@ const DIR = {
 };
 const RN = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI', 'XII'];
 const rg = a => a ? (a[0] === a[1] ? String(a[0]) : a[0] + '–' + a[1]) : '';
-const weight = q => q.type === 'prob' ? Math.max(1, parseInt(q.pts) || 1) : 1;
+const weight = q => fmtWeight(q);
 
 /* ---------- layout: numbering, sections, totals ---------- */
 function layout(ex) {
+  if (ex && fmtOf(ex) !== 'scantron') return fmtLayout(ex);
   const secs = [], num = {}, leaves = []; const start = Math.max(1, parseInt(ex && ex.start) || 1); let n = start - 1, cur = null, custom = false;
   const open = (k, title, dir, isCustom, sq) => { cur = { k, title, dir, top: [], pts: 0, items: 0, secId: sq ? sq.id : null }; secs.push(cur); custom = isCustom; };
   (ex ? ex.items : []).map(Q).filter(Boolean).forEach(t => {
@@ -28,22 +29,23 @@ function layout(ex) {
       let k = t.type; if (t.type === 'passage') { k = lv[0] ? lv[0].type : 'passage'; if (k === 'match') k = 'passage'; }
       open(k, (DIR[k] || DIR.mc)[0], (DIR[k] || DIR.mc)[1], false);
     }
-    lv.forEach(q => { const w = weight(q); num[q.id] = [n + 1, n + w]; n += w; cur.pts += w; cur.items++; leaves.push(q); });
+    lv.forEach(q => { const w = Math.max(1, Math.round(weight(q))); num[q.id] = [n + 1, n + w]; n += w; cur.pts += w; cur.items++; leaves.push(q); });
     if (isGroup(t)) num[t.id] = [from, Math.max(from, n)];
     cur.top.push({ t, leaves: lv });
   });
-  return { secs, num, leaves, total: n - (start - 1), start };
+  return { secs, num, leaves, total: n - (start - 1), count: n - (start - 1), start };
 }
 /* key status per leaf */
 function hasKey(q) {
+  const fk = fmtHasKey(q); if (fk !== undefined) return fk;
   if (q.type === 'mc' || q.type === 'cmc') return !!q.ans && LET.indexOf(q.ans) > -1 && LET.indexOf(q.ans) < (q.opts || []).length;
   if (q.type === 'match') { const p = parentOf(q); return !!q.ans && p && LET.indexOf(q.ans) < (p.sopts || []).length; }
   if (q.type === 'morse') return true;
   return !!String(q.ansText || '').trim();
 }
-const isEmptyQ = q => { if (q.type === 'morse') return !String(q.x || '').trim() || !String(q.y || '').trim(); if (q.type === 'match') return !stripHTML(q.stem); return !stripHTML(q.stem) && !/<img/i.test(q.stem || ''); };
+const isEmptyQ = q => { const fe = fmtIsEmpty(q); if (fe !== undefined) return fe; if (q.type === 'morse') return !String(q.x || '').trim() || !String(q.y || '').trim(); if (q.type === 'match') return !stripHTML(q.stem); return !stripHTML(q.stem) && !/<img/i.test(q.stem || ''); };
 function examChecks(ex) {
-  const L = layout(ex), r = { L, items: L.leaves.length, points: L.total, sections: L.secs.length, noKey: [], noComp: [], lowBloom: [], lowComp: [], empty: [], bloom: [0, 0, 0, 0, 0, 0] };
+  const L = layout(ex), r = { L, items: L.leaves.length, points: L.total, count: L.count ?? L.total, sections: L.secs.length, noKey: [], noComp: [], lowBloom: [], lowComp: [], empty: [], bloom: [0, 0, 0, 0, 0, 0] };
   L.leaves.forEach(q => {
     const n = rg(L.num[q.id]);
     if (!hasKey(q)) r.noKey.push(n);
@@ -70,7 +72,8 @@ const Exam = {
       el.innerHTML = `<div class="toolbar"><div class="tabtitle">Exam</div></div><div class="empty"><img src="${CHIBI.idea}" alt=""><b>No exam yet</b>Create your first assessment to start planning and adding questions.<div style="margin-top:12px"><button class="btn blue" data-a="new-exam">${icon('plus')}New exam</button></div></div>`;
       return;
     }
-    const C = examChecks(ex), tab = APP.examTab === 'builder' ? 'builder' : 'planner';
+    const C = examChecks(ex), tab = APP.examTab === 'builder' ? 'builder' : 'planner', fmt = fmtOf(ex);
+    const flow = [['overview', 'Overview'], ['planner', 'Exam Planner'], ['builder', fmt === 'gforms' ? 'Form Builder' : 'Exam Builder'], ['preview', 'Preview'], ...(fmt === 'gforms' ? [] : [['tos', fmt === 'onepage' ? 'TOS (optional)' : 'TOS']])];
     const st = { Draft: 'background:#fff3d8;color:#956a10', 'In review': 'background:#eef6ff;color:#276db4', Ready: 'background:#effaf2;color:#26774a', Administered: 'background:#f2efff;color:#5b4db0', Archived: 'background:#f1f4f9;color:#5b6f8a' }[ex.status] || '';
     el.innerHTML = `
       <div class="toolbar">
@@ -79,17 +82,18 @@ const Exam = {
           <button role="tab" aria-selected="${tab === 'planner'}" class="${tab === 'planner' ? 'on' : ''}" data-a="exam-tab" data-tab="planner">${icon('target')}Exam Planner</button>
           <button role="tab" aria-selected="${tab === 'builder'}" class="${tab === 'builder' ? 'on' : ''}" data-a="exam-tab" data-tab="builder">${icon('build')}Exam Builder</button>
         </div>
+        <button class="tag fmt-tag ${FORMATS[fmt].tc}" data-a="exam-tab" data-tab="planner" title="Change the format in the Exam Planner">${icon(FORMATS[fmt].icon)}${FORMATS[fmt].n}</button>
         <span class="tiny" id="exam-count">${plural(C.items, 'item')} · ${plural(C.points, 'point')}</span>
         <div class="dd"><button class="btn" data-dd="dd-exams">${icon('layers')}Switch exam ${icon('down')}</button>
           <div class="ddm right" id="dd-exams">${S.exams.map(e => `<button class="mi" data-a="open-exam" data-id="${e.id}">${e.id === ex.id ? icon('check') : icon('file')}<span>${esc(e.title || 'Untitled')}<small>${esc([e.subject, e.grade].filter(Boolean).join(' · ') || 'No subject yet')} · ${e.items.length} entries</small></span></button>`).join('')}
             <div class="mi-sep"></div><button class="mi" data-a="new-exam">${icon('plus')}New exam</button><button class="mi" data-a="dup-exam">${icon('copy')}Duplicate this exam</button><button class="mi" data-a="del-exam">${icon('trash')}Delete this exam</button></div></div>
         <button class="btn" data-a="preview">${icon('eye')}Preview</button>
-        <div class="dd"><button class="btn gold" data-dd="dd-export">Export exam ${icon('down')}</button><div class="ddm right" id="dd-export"><button class="mi" data-a="export-pdf">${icon('file')}<span>Exam as PDF<small>Print-ready, with page numbers</small></span></button><button class="mi" data-a="export-docx">${icon('file')}<span>Exam as Word (.docx)<small>Editable in Microsoft Word</small></span></button><div class="mi-sep"></div><button class="mi" data-a="export-key-pdf">${icon('check')}<span>Answer key (PDF)</span></button><button class="mi" data-a="print-exam">${icon('print')}<span>Print…</span></button></div></div>
+        <div class="dd"><button class="btn gold" data-dd="dd-export">Export ${fmt === 'scantron' ? 'exam' : fmt === 'onepage' ? 'quiz' : 'form'} ${icon('down')}</button><div class="ddm right" id="dd-export">${fmt === 'onepage' ? `<button class="mi" data-a="export-pdf">${icon('file')}<span>Quiz as PDF<small>Long bond, back to back</small></span></button><button class="mi" data-a="export-docx">${icon('file')}<span>Quiz as Word (.docx)<small>Editable in Microsoft Word</small></span></button><div class="mi-sep"></div><button class="mi" data-a="export-key-pdf">${icon('check')}<span>Answer key (PDF)<small>Answers highlighted</small></span></button><button class="mi" data-a="export-key-docx">${icon('check')}<span>Answer key (Word)</span></button><button class="mi" data-a="print-exam">${icon('print')}<span>Print…</span></button>` : fmt === 'gforms' ? `<button class="mi" data-a="gf-export">${icon('upload')}<span>Send to Google Forms…<small>Creates the quiz in your Google account</small></span></button><div class="mi-sep"></div><button class="mi" data-a="export-pdf">${icon('file')}<span>Printable copy (PDF)</span></button><button class="mi" data-a="export-key-pdf">${icon('check')}<span>Answer key (PDF)</span></button>` : `<button class="mi" data-a="export-pdf">${icon('file')}<span>Exam as PDF<small>Print-ready, with page numbers</small></span></button><button class="mi" data-a="export-docx">${icon('file')}<span>Exam as Word (.docx)<small>Editable in Microsoft Word</small></span></button><div class="mi-sep"></div><button class="mi" data-a="export-key-pdf">${icon('check')}<span>Answer key (PDF)</span></button><button class="mi" data-a="print-exam">${icon('print')}<span>Print…</span></button>`}</div></div>
       </div>
       <div class="exam-idbar">
         <div class="exam-id"><span class="eyebrow">CURRENT EXAM</span><b>${esc(ex.title || 'Untitled')}</b><span>${esc([ex.subject, ex.grade].filter(Boolean).join(' · ') || 'Subject and class not set')}</span><span class="status-chip" style="${st}">${esc(ex.status)}</span>
           <button class="btn sm ghost" data-a="toggle-details" title="Show or hide the assessment details">${icon('file')}Exam details ${icon('down')}</button></div>
-        <nav class="flow" aria-label="Workflow">${[['overview', 'Overview'], ['planner', 'Exam Planner'], ['builder', 'Exam Builder'], ['preview', 'Preview'], ['tos', 'TOS']].map(([k, n], i) => `${i ? '<span class="sep">›</span>' : ''}<button class="${(k === tab) ? 'on' : ''}" data-a="flow" data-step="${k}">${n}</button>`).join('')}</nav>
+        <nav class="flow" aria-label="Workflow">${flow.map(([k, n], i) => `${i ? '<span class="sep">›</span>' : ''}<button class="${(k === tab) ? 'on' : ''}" data-a="flow" data-step="${k}">${n}</button>`).join('')}</nav>
       </div>
       <div id="exam-tab"></div>`;
     const box = $('#exam-tab');
@@ -170,7 +174,7 @@ const Exam = {
   },
   card(q, L, top, kid) {
     if (!q) return '';
-    const n = L && L.num[q.id];
+    const n = L && ((L.pnum && L.pnum[q.id]) || L.num[q.id]);
     const tools = `<div class="qtools">${top ? `<button class="btn icon sm ghost" data-a="q-up" title="Move up">${icon('up')}</button><button class="btn icon sm ghost" data-a="q-down" title="Move down">${icon('down')}</button>` : `<button class="btn icon sm ghost" data-a="kid-up" title="Move up">${icon('up')}</button><button class="btn icon sm ghost" data-a="kid-down" title="Move down">${icon('down')}</button>`}
       <button class="btn icon sm ghost" data-a="q-dup" title="Duplicate">${icon('copy')}</button>
       ${top && q.type !== 'section' ? `<button class="btn sm ${q.inBank ? 'on' : ''}" data-a="q-bank" title="${q.inBank ? 'This item is in the item bank' : 'Save a copy to the item bank'}">${q.inBank ? icon('check') + 'In bank' : icon('bank') + 'Save to bank'}</button>` : ''}
@@ -194,17 +198,18 @@ const Exam = {
       h += `<div class="row">${isM ? `<button class="btn sm" data-a="add-kid" data-type="match">${icon('plus')}Add Column A item</button>` : `<div class="dd"><button class="btn sm" data-dd="dd-kid-${q.id}">${icon('plus')}Add linked question ${icon('down')}</button><div class="ddm" id="dd-kid-${q.id}">${['mc', 'ident', 'cmc', 'morse', 'match'].map(t => `<button class="mi" data-a="add-kid" data-type="${t}">${TYPE_NAMES[t]}${t === 'match' ? '<small>Answered from the shared choices</small>' : ''}</button>`).join('')}</div></div>`}</div></div>`;
       return h;
     }
-    const kidTypes = parentOf(q) ? (parentOf(q).type === 'matching' ? ['match'] : ['mc', 'ident', 'cmc', 'morse', 'match']) : ['mc', 'ident', 'cmc', 'morse', 'prob'];
+    const kidTypes = parentOf(q) ? (parentOf(q).type === 'matching' ? ['match'] : ['mc', 'ident', 'cmc', 'morse', 'match']) : (fmtKidTypes(q) || ['mc', 'ident', 'cmc', 'morse', 'prob']);
     let h = `<div class="qcard ${kid ? 'kid' : 'qtop'}" data-id="${q.id}"><div class="qhead">${grip}<span class="qnum" title="Item number">${rg(n) || '—'}</span>
       <select data-f="type" title="Question format">${kidTypes.map(t => `<option value="${t}"${t === q.type ? ' selected' : ''}>${TYPE_SHORT[t]}</option>`).join('')}</select>
       ${this.bloomSel(q)}${this.compSel(q)}
-      ${q.type === 'prob' ? `<label class="pts">Points <input type="number" min="1" max="50" data-f="pts" value="${q.pts}"></label>` : `<span class="qmeta">1 pt</span>`}
+      ${fmtPtsHTML(q) || (q.type === 'prob' ? `<label class="pts">Points <input type="number" min="1" max="50" data-f="pts" value="${q.pts}"></label>` : `<span class="qmeta">1 pt</span>`)}
       ${tools}</div>`;
     h += this.body(q);
     h += `</div>`;
     return h;
   },
-  body(q) {
+  body(q) { const fb = fmtBody(q); if (fb != null) return fb; return this.bodyStd(q) + fmtBodyExtra(q); },
+  bodyStd(q) {
     const ed = (ph) => `<div class="ed" contenteditable="true" data-f="stem" data-ph="${ph}">${q.stem || ''}</div>`;
     const optRows = () => (q.opts || []).map((o, i) => `<div class="orow${q.ans === LET[i] ? ' correct' : ''}" data-orow="${i}"><span class="ograb" data-ograb="opts" title="Drag to reorder this choice">${icon('grip')}</span><input type="radio" name="ans-${q.id}" data-f="ans" data-i="${i}"${q.ans === LET[i] ? ' checked' : ''} title="Mark ${LET[i]} as the correct answer"><b>${LET[i]}</b><input data-f="opt" data-i="${i}" value="${esc(o)}" placeholder="Choice ${LET[i]}">${q.type === 'mc' ? `<button class="btn icon sm ghost" data-a="opt-img" data-i="${i}" title="Attach an image to this choice">${icon('image')}</button>` : ''}<button class="btn icon sm ghost" data-a="del-opt" data-i="${i}" title="Remove choice">${icon('x')}</button></div>${(q.oimg || [])[i] ? `<div class="oimg"><img src="${q.oimg[i]}" alt="Choice ${LET[i]} image"><button class="btn sm ghost" data-a="del-opt-img" data-i="${i}">Remove image</button></div>` : ''}`).join('') + ((q.opts || []).length < 5 ? `<button class="btn sm" data-a="add-opt">${icon('plus')}Add choice</button>` : '') + (q.ans ? '' : `<div class="why">Tick the circle beside the correct choice to set the answer key.</div>`);
     if (q.type === 'mc') return ed('Type the question') + optRows();
@@ -257,7 +262,7 @@ document.addEventListener('input', e => {
   else if (f === 'stmt') q.statements[+t.dataset.i] = t.value;
   else if (f === 'sopt') { q.sopts[+t.dataset.i] = t.value; }
   else if (f === 'x' || f === 'y' || f === 'ansText' || f === 'head' || f === 'title' || f === 'dir') q[f] = t.value;
-  else if (f === 'pts') { q.pts = clamp(parseInt(t.value) || 1, 1, 50); refreshNumbersSoon(); }
+  else if (f === 'pts') { if (curFmt() !== 'scantron' || OP_TYPES.has(q.type)) { q.pts = clamp(parseFloat(t.value) || 0, 0, 100); if (curFmt() === 'gforms') q.pts = Math.round(q.pts); } else { q.pts = clamp(parseInt(t.value) || 1, 1, 50); refreshNumbersSoon(); } }
   else return;
   if (['stem', 'x', 'y', 'stmt'].includes(f) && isLeaf(q) && !q.bloomManual) { Classify.autoBloom(q); refreshBloomUI(card, q); }
   if (f === 'stem' && isGroup(q)) kidsOf(q).forEach(k => { if (!k.bloomManual) Classify.autoBloom(k); });
@@ -275,13 +280,14 @@ document.addEventListener('change', e => {
   else if (f === 'mans') q.ans = t.value;
   else if (f === 'xt' || f === 'yt') { q[f] = t.value === '1'; q.ans = morseAns(q); const m = card.querySelector('[data-morse]'); if (m) m.innerHTML = `Answer key: <b>${q.ans}</b> — ${['Only X is true', 'Only Y is true', 'Both are true', 'Both are false'][LET.indexOf(q.ans)]}`; }
   else if (f === 'fbd') q.fbd = t.checked;
-  else if (f === 'preset') { q.preset = t.value; if (t.value !== 'custom') { q.title = DIR[t.value][0]; q.dir = DIR[t.value][1]; } touchQ(q); Exam.rerender(); return; }
+  else if (f === 'preset') { if (curFmt() !== 'scantron') return; q.preset = t.value; if (t.value !== 'custom') { q.title = DIR[t.value][0]; q.dir = DIR[t.value][1]; } touchQ(q); Exam.rerender(); return; }
   else if (f === 'type') { changeType(q, t.value); touchQ(q); Exam.rerender(); return; }
   else return;
   touchQ(q); refreshMetaSoon();
 });
 Exam.rerenderCard = q => { const c = $(`.qcard[data-id="${q.id}"]`); if (!c) return; if (c.closest('#qeditor')) return Bank.renderEditor(); const L = layout(curExam()); const top = c.classList.contains('qtop'); const tmp = document.createElement('div'); tmp.innerHTML = Exam.card(q, L, top, !top); c.replaceWith(tmp.firstElementChild); };
 function changeType(q, type) {
+  if (fmtChangeType(q, type)) return;
   const old = q.type; if (old === type) return; q.type = type;
   if ((type === 'mc' || type === 'cmc') && !(q.opts || []).length) q.opts = type === 'cmc' ? ['I only', 'I and II only', 'II and III only', 'I, II, and III'] : ['', '', '', ''];
   if (type === 'cmc' && !(q.statements || []).length) q.statements = ['', '', ''];
@@ -327,8 +333,8 @@ ACT['q-bank'] = b => {
   if (q.inBank) { toast('Already in the item bank. Edit it in the bank or here — they are the same item.', 'info'); return; }
   q.inBank = true; touchQ(q); Exam.rerenderCard(q); App.refreshChrome(); toast('Saved to the item bank.');
 };
-ACT['add-opt'] = b => { const [, q] = qOfEl(b); if (q.opts.length >= 5) return; q.opts.push(''); touchQ(q); Exam.rerenderCard(q); };
-ACT['del-opt'] = b => { const [, q] = qOfEl(b); const i = +b.dataset.i, k = q.ans ? LET.indexOf(q.ans) : -1; q.opts.splice(i, 1); if (q.oimg) q.oimg.splice(i, 1); if (k === i) q.ans = ''; else if (k > i) q.ans = LET[k - 1]; touchQ(q); Exam.rerenderCard(q); refreshMetaSoon(); };
+ACT['add-opt'] = b => { const [, q] = qOfEl(b); const g = GTYPES.has(q.type); if (q.opts.length >= (g ? 20 : 5)) return; q.opts.push(g ? 'Option ' + (q.opts.length + 1) : ''); touchQ(q); Exam.rerenderCard(q); refreshMetaSoon(); if (g) setTimeout(() => { const c = $(`.qcard[data-id="${q.id}"] [data-f=opt][data-i="${q.opts.length - 1}"]`); if (c) { c.focus(); c.select(); } }, 30); };
+ACT['del-opt'] = b => { const [, q] = qOfEl(b); const i = +b.dataset.i, k = q.ans ? LET.indexOf(q.ans) : -1; q.opts.splice(i, 1); if (q.oimg) q.oimg.splice(i, 1); if (q.ansMulti) q.ansMulti = q.ansMulti.filter(x => x !== i).map(x => x > i ? x - 1 : x); if (k === i) q.ans = ''; else if (k > i) q.ans = LET[k - 1]; touchQ(q); Exam.rerenderCard(q); refreshMetaSoon(); };
 ACT['opt-img'] = async b => { const [, q] = qOfEl(b); const src = await pickImage(420).catch(e => { toast(e.message, 'error'); return null; }); if (!src) return; (q.oimg = q.oimg || [])[+b.dataset.i] = src; touchQ(q); Exam.rerenderCard(q); };
 ACT['del-opt-img'] = b => { const [, q] = qOfEl(b); q.oimg[+b.dataset.i] = ''; touchQ(q); Exam.rerenderCard(q); };
 ACT['add-stmt'] = b => { const [, q] = qOfEl(b); if (q.statements.length >= 5) return; q.statements.push(''); touchQ(q); Exam.rerenderCard(q); };
@@ -423,7 +429,7 @@ ACT['pick-bank'] = () => {
   m.addEventListener('change', e => { if (e.target.classList.contains('chk')) { e.target.checked ? sel.add(e.target.value) : sel.delete(e.target.value); $('#pk-n').textContent = sel.size + ' selected'; } });
   $('#pk-add').onclick = () => {
     if (!sel.size) return toast('Select at least one item.', 'info');
-    sel.forEach(id => { const src = Q(id); const c = cloneQ(src, { inBank: false, srcBank: src.id }); ex.items.push(c.id); });
+    sel.forEach(id => { const src = Q(id); const c = cloneQ(src, { inBank: false, srcBank: src.id }); ex.items.push(...fmtAdopt(ex, c)); });
     ex.updated = nowISO(); touch(); closeModal(true); APP.examTab = 'builder'; App.go('exam'); toast(plural(sel.size, 'item') + ' added to the exam.');
   };
 };
@@ -452,6 +458,7 @@ table.mt{width:100%;border-collapse:collapse;margin:0 0 14pt}table.mt td,table.m
 const gradeNo = ex => { const m = String(ex.grade || '').match(/\d+/); return m ? m[0] : ''; };
 function optsHTML(list, imgs) { return `<div class="opts">${list.map((o, k) => `<div>${LET[k]}.&nbsp;&nbsp;${esc(o)}${imgs && imgs[k] ? `<img src="${imgs[k]}" alt="">` : ''}</div>`).join('')}</div>`; }
 function leafPrint(q, numLabel) {
+  if (OP_TYPES.has(q.type)) return `<div class="q" style="display:block">${OnePage.itemHTML(q, numLabel, false, null)}</div>`;
   const qn = `<span class="qn">${numLabel}.</span>`;
   if (q.type === 'morse') return `<div class="q">${qn}<div class="qb">${stripHTML(q.stem) ? `<div>${q.stem}</div>` : ''}<b>X:</b> ${esc(q.x)}<br><b>Y:</b> ${esc(q.y)}</div></div>`;
   if (q.type === 'ident') return `<div class="q">${qn}<div class="qb">${q.stem}<span class="blank"></span></div></div>`;
@@ -469,7 +476,7 @@ function groupHeadParts(L, t, lv) {
   return [r[0] === r[1] ? `For item number ${r[0]},` : `For item numbers ${r[0]} to ${r[1]},`, hd];
 }
 const groupHead = (L, t, lv) => groupHeadParts(L, t, lv).filter(Boolean).join(' ');
-function answerOf(q) { if (q.type === 'morse') return morseAns(q); if (q.type === 'mc' || q.type === 'cmc' || q.type === 'match') return q.ans || '—'; return q.ansText || '—'; }
+function answerOf(q) { const fa = fmtAnswerOf(q); if (fa !== undefined) return fa; if (q.type === 'morse') return morseAns(q); if (q.type === 'mc' || q.type === 'cmc' || q.type === 'match') return q.ans || '—'; return q.ansText || '—'; }
 function schoolLines(ex) { return String(ex.school || S.settings.school || '').split(/\s*(?:\n|\|)\s*/).filter(Boolean); }
 function examBodyHTML(ex, opts = {}) {
   const L = layout(ex), g = gradeNo(ex);
@@ -507,7 +514,7 @@ function keyHTML(ex, L, pageBreak) {
 }
 function printDoc(body, title, landscape, paperKey) {
   const p = PAPER[paperKey || S.settings.paper] || PAPER.letter;
-  return `<!doctype html><html><head><meta charset="utf-8"><title>${esc(title)}</title><style>@page{size:${landscape ? p.h + 'in ' + p.w + 'in' : p.w + 'in ' + p.h + 'in'};margin:${landscape ? '0.5in' : '0.75in 0.8in 0.85in'}}${PRINT_CSS}${TOS_PRINT_CSS}</style></head><body>${body}</body></html>`;
+  return `<!doctype html><html><head><meta charset="utf-8"><title>${esc(title)}</title><style>@page{size:${landscape ? p.h + 'in ' + p.w + 'in' : p.w + 'in ' + p.h + 'in'};margin:${landscape ? '0.5in' : '0.75in 0.8in 0.85in'}}${PRINT_CSS}${TOS_PRINT_CSS}${OP_ITEM_CSS}</style></head><body>${body}</body></html>`;
 }
 async function exportExamPDF(key, keyOnly) {
   const ex = curExam(); if (!ex || !ex.items.length) return toast('Add questions before exporting.', 'info');
@@ -517,7 +524,7 @@ async function exportExamPDF(key, keyOnly) {
   toast('Preparing PDF…', 'info', 1800);
   const r = await Host.printToPDF(printDoc(body, ex.title, false), { defaultName: name, pageSize: { width: p.w, height: p.h }, landscape: false, footer: (ex.subject || ex.title || 'Assessment') + (keyOnly ? ' — Answer Key' : ''), margins: { top: 0.75, bottom: 0.85, left: 0.8, right: 0.8 } });
   if (r && r.canceled) return; if (r && r.ok === false) return toast('PDF export failed: ' + r.error, 'error');
-  toast('Tip: in the print dialog, set Destination to “Save as PDF”.', 'info');
+  pdfDoneToast(r);
 }
 ACT['export-pdf'] = () => exportExamPDF(false);
 ACT['export-key-pdf'] = () => exportExamPDF(false, true);
@@ -527,7 +534,7 @@ ACT['preview'] = () => {
   const p = PAPER[S.settings.paper] || PAPER.letter;
   const m = modal(`<h3>Print preview — ${esc(ex.title)}</h3><div class="row" style="margin:8px 0 10px"><label class="tiny">Paper <select class="inp sm" id="pv-paper">${Object.entries(PAPER).map(([k, v]) => `<option value="${k}"${k === S.settings.paper ? ' selected' : ''}>${v.name}</option>`).join('')}</select></label><label class="tiny"><input type="checkbox" id="pv-key"> Show answer key page</label><span class="spacer"></span><button class="btn" data-a="export-docx">${icon('file')}Word</button><button class="btn" data-a="print-exam">${icon('print')}Print</button><button class="btn gold" id="pv-pdf">${icon('download')}Save PDF</button></div>
     <div class="preview-wrap"><div class="preview-page portrait" id="pv-page" style="width:${p.w}in"></div></div>`, { size: 'wide' });
-  const draw = () => { const pg = $('#pv-page'); const sh = pg.attachShadow ? (pg.shadowRoot || pg.attachShadow({ mode: 'open' })) : pg; sh.innerHTML = `<style>${PRINT_CSS}</style>` + examBodyHTML(ex, { key: $('#pv-key').checked }); };
+  const draw = () => { const pg = $('#pv-page'); const sh = pg.attachShadow ? (pg.shadowRoot || pg.attachShadow({ mode: 'open' })) : pg; sh.innerHTML = `<style>${PRINT_CSS}${OP_ITEM_CSS}</style>` + examBodyHTML(ex, { key: $('#pv-key').checked }); };
   draw(); $('#pv-key').onchange = draw;
   $('#pv-paper').onchange = e => { S.settings.paper = e.target.value; touch(); $('#pv-page').style.width = PAPER[e.target.value].w + 'in'; };
   $('#pv-pdf').onclick = () => exportExamPDF($('#pv-key').checked);
@@ -599,6 +606,7 @@ async function examDocx(ex, withKey) {
       }
       for (const q of leaves) {
         const n = L.num[q.id];
+        if (OP_TYPES.has(q.type)) { ch.push(...(await OnePage.docxItem(q, rg(n), false, null)), gap()); continue; }
         if (q.type === 'prob') {
           ch.push(P([T(rg(n) + '.  ', { bold: true }), ...(await htmlRuns(q.stem)), T(' (' + plural(weight(q), 'point') + ')', { italics: true })], { keepNext: true, alignment: J, spacing: { after: 160 } }));
           ch.push(new D.Table({ width: { size: 100, type: D.WidthType.PERCENTAGE }, rows: [...(q.fbd ? [R(2000, [cell('Free-Body Diagram', { columnSpan: 2 })])] : []), R(1600, [cell('Given and Required', { width: { size: 34, type: D.WidthType.PERCENTAGE } }), cell('Complete Solution & Answer', { rowSpan: 2 })]), R(1600, [cell('Equation')])] }), gap());
@@ -694,6 +702,7 @@ function reorderChoices(q, field, from, to) {
     const order = moveIndex([...Array(n).keys()], from, to);
     q.opts = order.map(i => q.opts[i]); q.oimg = order.map(i => (q.oimg || [])[i] || '');
     if (ansIdx > -1) q.ans = LET[order.indexOf(ansIdx)];
+    if (q.ansMulti) q.ansMulti = q.ansMulti.map(x => order.indexOf(x)).sort((a, b) => a - b);
   } else if (field === 'sopts') {
     const n = q.sopts.length, order = moveIndex([...Array(n).keys()], from, to);
     q.sopts = order.map(i => q.sopts[i]);

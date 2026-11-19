@@ -1,13 +1,13 @@
 /* Jin Assessment Studio — core: utilities, host bridge, state, persistence, UI primitives */
 'use strict';
-const APP = { version: '1.1.0', screen: 'overview' };
+const APP = { version: '1.2.0', screen: 'overview' };
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const uid = () => Date.now().toString(36).slice(-4) + Math.random().toString(36).slice(2, 9);
 const nowISO = () => new Date().toISOString();
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-const LET = 'ABCDEFGHIJ';
+const LET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
 /* ORIGINAL Bloom's Taxonomy (1956), as used in the school's TOS. Index = hierarchy rank. */
 const BL = ['Knowledge', 'Comprehension', 'Application', 'Analysis', 'Synthesis', 'Evaluation'];
 const BL_SHORT = ['Knowledge', 'Comprehension', 'Application', 'Analysis', 'Synthesis', 'Evaluation'];
@@ -109,7 +109,7 @@ const Host = (() => {
 /* ---------- state ---------- */
 const DEFAULT_INSTR = 'Read each item carefully. Choose or write the best answer. Show your complete solutions where required.';
 function newExam(o = {}) {
-  return Object.assign({ id: uid(), title: 'Untitled Assessment', subject: '', grade: '', teacher: (S && S.settings && S.settings.teacher) || '', date: '', schoolYear: '', start: 1, school: '', logo: '', quarter: '', strand: '', plan: null, instr: DEFAULT_INSTR, endNote: '---------- END OF EXAMINATION ----------\nREVIEW YOUR ANSWERS.', status: 'Draft', items: [], created: nowISO(), updated: nowISO() }, o);
+  return Object.assign({ id: uid(), title: 'Untitled Assessment', subject: '', grade: '', teacher: (S && S.settings && S.settings.teacher) || '', date: '', schoolYear: '', start: 1, school: '', logo: '', quarter: '', strand: '', plan: null, instr: DEFAULT_INSTR, endNote: '---------- END OF EXAMINATION ----------\nREVIEW YOUR ANSWERS.', status: 'Draft', items: [], created: nowISO(), updated: nowISO(), format: 'scantron', opHead: '', opTopic: '', motto: '', footer: '', opCN: true, opSheets: 1, formula: '', formulaSep: false, gf: { desc: '', email: false, shuffle: false, required: true, confirm: '' } }, o);
 }
 function defaultState() {
   return {

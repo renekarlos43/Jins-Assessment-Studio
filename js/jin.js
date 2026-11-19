@@ -23,8 +23,14 @@ const Jin = {
     const b = C.bloom, tot = C.points || 1, low = (b[0] + b[1]) / tot, hots = (b[3] + b[4] + b[5]) / tot;
     if (n >= 5 && low > .7) out.push({ sev: 'warn', title: 'Check Bloom balance', sub: `${Math.round(low * 100)}% of points are Knowledge/Comprehension.`, a: 'goto', screen: 'exam', tab: 'builder', next: 'Consider turning a few recall items into application or analysis items.' });
     else if (n >= 8 && hots < .1) out.push({ sev: 'info', title: 'Add a higher-order item or two', sub: `Analysis, Synthesis and Evaluation make up ${Math.round(hots * 100)}% of points.`, a: 'goto', screen: 'exam', tab: 'builder', next: 'A short data-interpretation or justify-your-answer item helps.' });
-    const t = S.tos[ex.id];
-    if (!t || !t.generatedAt) out.push({ sev: 'info', title: 'Generate the TOS', sub: 'Fill the table from this exam in one click.', a: 'gen-tos', next: 'Use Generate TOS in Quick Tools.' });
+    const t = S.tos[ex.id], fm = fmtOf(ex);
+    if (fm === 'onepage') {
+      const F = OnePage.fitCache[ex.id], target = Planner.ensure(ex).points;
+      if (F && !F.fits) out.unshift({ sev: 'bad', title: `The quiz doesn’t fit on ${plural(Math.max(1, ex.opSheets || 1), 'sheet')}`, sub: `It needs ${F.sides} sides; ${plural(Math.max(1, ex.opSheets || 1), 'sheet')} printed back to back has ${F.cap}.`, a: 'goto', screen: 'exam', tab: 'builder', next: 'Shorten answer boxes or remove an item, or use “Add another sheet”.' });
+      if (target && C.points !== target) out.push({ sev: 'warn', title: `Total is ${C.points} of ${target} points`, sub: C.points < target ? `${ptsNum(target - C.points)} more point(s) needed.` : `${ptsNum(C.points - target)} point(s) over.`, a: 'goto', screen: 'exam', tab: 'builder', next: 'Adjust item points, or change the target in the Score card.' });
+    }
+    if (fm !== 'scantron') { /* TOS is optional for one page and not needed for Google Forms */ }
+    else if (!t || !t.generatedAt) out.push({ sev: 'info', title: 'Generate the TOS', sub: 'Fill the table from this exam in one click.', a: 'gen-tos', next: 'Use Generate TOS in Quick Tools.' });
     else { const T = Tos.totals(t); if (T.grand !== C.points) out.push({ sev: 'warn', title: 'TOS total doesn’t match the exam', sub: `Table ${T.grand} vs exam ${C.points} item points.`, a: 'goto', screen: 'tos', next: 'Regenerate the TOS or adjust its counts.' }); }
     Analysis.groupsFor(ex).forEach(g => {
       if (Analysis.isStale(g)) out.push({ sev: 'warn', title: `Recalculate ${g.name}`, sub: 'Its item-analysis results are out of date.', a: 'goto', screen: 'analysis', next: 'Open Item Analysis and press Recalculate.' });
@@ -79,7 +85,7 @@ const Jin = {
     p.innerHTML = `<div class="assistant-head"><div class="panel-face"><img src="assets/jin/anime-${this.tab === 'analysis' ? 'planning' : this.tab === 'compare' ? 'planning' : 'welcome'}-face.webp" alt="Jin"></div><div><span class="eyebrow">JIN · ASSESSMENT HELPER</span><h2>${this.tab === 'compare' ? 'Do these outcomes connect?' : this.tab === 'analysis' ? 'How did the class do?' : this.tab === 'plan' ? 'Let’s plan this exam' : 'Let’s check your exam'}</h2></div><button class="assistant-close" data-a="assistant-close" aria-label="Close">${icon('x')}</button></div>
       <div class="assistant-tabs">${tabs.map(([k, n]) => `<button class="${k === this.tab ? 'on' : ''}" data-a="jin-tab" data-tab="${k}">${n}</button>`).join('')}</div>
       <div id="jin-body">${this.tab === 'plan' ? this.planHTML() : this.tab === 'compare' ? this.compareHTML() : this.tab === 'analysis' ? this.analysisHTML() : this.reviewHTML()}</div>
-      <p class="assistant-intro" style="margin-bottom:0">I work entirely in your browser from your wording and exam data — nothing is sent online. My suggestions are hints, not verdicts; you decide.</p>`;
+      <p class="assistant-intro" style="margin-bottom:0">I work entirely on this device from your wording and exam data — nothing is sent online. My suggestions are hints, not verdicts; you decide.</p>`;
   },
   planHTML() {
     const ex = curExam(); if (!ex) return `<div class="jres"><b>No exam open.</b><p>Create an exam and I’ll help you plan it.</p></div>`;

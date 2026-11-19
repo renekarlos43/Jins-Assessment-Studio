@@ -107,11 +107,14 @@ const Classify = (() => {
     const parts = [stripHTML(q.stem)];
     if (q.type === 'morse') parts.push(q.x || '', q.y || '');
     if (q.type === 'cmc') parts.push((q.statements || []).join(' '));
-    return parts.join(' ').trim();
+    if (q.type === 'seq') parts.unshift(q.head || '', 'Arrange the events in chronological order:', (q.events || []).join('; '));
+    if (q.type === 'table') parts.push('Complete the table: ' + (q.cols || []).join(', '));
+    if (q.type === 'crossword') parts.push('Crossword clues: ' + (q.words || []).map(x => x.c).join('; '));
+    return parts.join(' ').replace(/\s+/g, ' ').trim();
   }
   function infoFor(q) {
     const p = parentOf(q);
-    return bloomInfo({ stem: q.stem, type: q.type, opts: q.type === 'match' && p ? p.sopts : q.opts, statements: q.statements, x: q.x, y: q.y, inPassage: !!(p && p.type === 'passage'), passage: p ? p.stem : '', hasImage: /<img/i.test(q.stem || '') || (p && /<img/i.test(p.stem || '')), pts: q.pts });
+    return bloomInfo({ stem: ['seq', 'table', 'crossword'].includes(q.type) ? esc(textOf(q)) : q.stem, type: q.type, opts: q.type === 'match' && p ? p.sopts : q.opts, statements: q.statements, x: q.x, y: q.y, inPassage: !!(p && p.type === 'passage'), passage: p ? p.stem : '', hasImage: /<img/i.test(q.stem || '') || (p && /<img/i.test(p.stem || '')), pts: q.pts });
   }
   /* apply automatic Bloom unless the teacher set it manually */
   function autoBloom(q, force) {
