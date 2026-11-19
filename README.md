@@ -11,6 +11,13 @@ The same app as the desktop version, running in the browser. It works on GitHub 
 - If you clear this site's data or browsing history, the saved work is deleted. Save backups regularly.
 - **Settings → Automatic snapshots** keeps recent copies in the browser: one each time the site opens, and one before every restore.
 
+## Put it on GitHub Pages
+
+1. Create a new repository on GitHub. It must be public for free GitHub Pages.
+2. Upload **everything in this folder**: `index.html`, `.nojekyll`, `css/`, `js/`, `assets/`, `fonts/` and `vendor/`. `index.html` must sit at the top level of the repository. Uploading through the web page skips hidden files, so you may need to create `.nojekyll` yourself with **Add file → Create new file**. It can stay empty.
+3. Go to **Settings → Pages**. Under *Build and deployment*, choose **Deploy from a branch**, branch **main**, folder **/ (root)**, then click **Save**.
+4. After a minute or two the site appears at `https://<your-username>.github.io/<repository-name>/`.
+
 ## Exports in the browser
 
 | Feature | In the browser |
